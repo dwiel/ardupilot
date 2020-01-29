@@ -462,7 +462,7 @@ class uploader(object):
         ret = self.__recv(length)
         self.__getSync()
         return ret
-    
+
     # send the reboot command
     def __reboot(self):
         self.__send(uploader.REBOOT +
@@ -516,7 +516,7 @@ class uploader(object):
         f.close()
         self.__drawProgressBar(label, total, self.fw_maxsize)
         print("\nReceived %u bytes to %s" % (total, fw))
-        
+
     # verify code
     def __verify_v2(self, label, fw):
         print("\n", end='')
@@ -681,11 +681,11 @@ class uploader(object):
                          board_name, self.board_type, fw.property('board_id'))
                     print("INFO: %s" % msg)
                     incomp = False
-            if incomp:                        
+            if incomp:
                 msg = "Firmware not suitable for this board (board_type=%u board_id=%u)" % (
                     self.board_type, fw.property('board_id'))
                 print("WARNING: %s" % msg)
-                
+
                 if force:
                     print("FORCED WRITE, FLASHING ANYWAY!")
                 else:
@@ -769,7 +769,7 @@ class uploader(object):
 
         self.__download("Download", fw)
         self.port.close()
-    
+
 def ports_to_try(args):
     portlist = []
     if args.port is None:
@@ -878,7 +878,7 @@ def main():
 
             for port in ports_to_try(args):
 
-                # print("Trying %s" % port)
+                print("Trying %s" % port)
 
                 # create an uploader attached to the port
                 try:
