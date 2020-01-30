@@ -925,19 +925,6 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
         packet.thrust = constrain_float(packet.thrust, 0.0f, 1.0f);
 
         if (rate_ignore && !attitude_ignore) {
-            // convert thrust to climb rate
-            float climb_rate_cms = 0.0f;
-            if (is_equal(packet.thrust, 0.5f)) {
-                climb_rate_cms = 0.0f;
-            } else if (packet.thrust > 0.5f) {
-                // climb at up to WPNAV_SPEED_UP
-                climb_rate_cms = (packet.thrust - 0.5f) * 2.0f * copter.wp_nav->get_default_speed_up();
-            } else {
-                // descend at up to WPNAV_SPEED_DN
-                climb_rate_cms = (0.5f - packet.thrust) * 2.0f * -fabsf(copter.wp_nav->get_default_speed_down());
-            }
-
-            // if the body_yaw_rate field is ignored, use the commanded yaw position
             // otherwise use the commanded yaw rate
             bool use_yaw_rate = false;
             if ((packet.type_mask & (1<<2)) == 0) {
@@ -946,7 +933,7 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
 
             copter.mode_guided.set_angle(
                 Quaternion(packet.q[0],packet.q[1],packet.q[2],packet.q[3]),
-                climb_rate_cms,
+                packet.thrust,
                 use_yaw_rate,
                 packet.body_yaw_rate
             );
