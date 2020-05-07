@@ -283,7 +283,11 @@ class Board:
             self.embed_ROMFS_files(bld)
 
     def build(self, bld):
-        bld.ap_version_append_str('GIT_VERSION', bld.git_head_hash(short=True))
+        try:
+            bld.ap_version_append_str('GIT_VERSION', bld.git_head_hash(short=True))
+        except waflib.Errors.WafError as e:
+            bld.ap_version_append_str('GIT_VERSION', '00000000')
+
         import time
         ltime = time.localtime()
         if bld.env.build_dates:

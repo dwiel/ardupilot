@@ -135,6 +135,6 @@ apt-cache search arm-none-eabi
 
 (
  cd $ARDUPILOT_ROOT
- git submodule update --init --recursive
+ # git submodule update --init --recursive
 )
 echo "---------- $0 end ----------"
