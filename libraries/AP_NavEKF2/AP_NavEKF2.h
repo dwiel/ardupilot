@@ -59,7 +59,7 @@ public:
 
     // check if we should write log messages
     void check_log_write(void);
-    
+
     // Check basic filter health metrics and return a consolidated health status
     bool healthy(void) const;
     // Ensure that all started cores are considered healthy
@@ -72,7 +72,7 @@ public:
     // returns the index of the IMU of the primary core
     // return -1 if no primary core selected
     int8_t getPrimaryCoreIMUIndex(void) const;
-    
+
     // Write the last calculated NE position relative to the reference point (m) for the specified instance.
     // An out of range instance (eg -1) returns data for the primary instance
     // If a calculated solution is not available, use the best available data and return false
@@ -464,7 +464,7 @@ private:
 
     // time at start of current filter update
     uint64_t imuSampleTime_us;
-    
+
     struct {
         uint32_t last_function_call;  // last time getLastYawYawResetAngle was called
         bool core_changed;            // true when a core change happened and hasn't been consumed, false otherwise
