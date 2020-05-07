@@ -1,6 +1,8 @@
 #include "Copter.h"
 
 #include "GCS_Mavlink.h"
+#include <GCS_MAVLink/GCS.h>
+
 
 /*
  *  !!NOTE!!
@@ -117,7 +119,7 @@ void GCS_MAVLINK_Copter::send_position_target_local_ned()
     if (!copter.flightmode->in_guided_mode()) {
         return;
     }
-    
+
     const GuidedMode guided_mode = copter.mode_guided.mode();
     Vector3f target_pos;
     Vector3f target_vel;
@@ -138,7 +140,7 @@ void GCS_MAVLINK_Copter::send_position_target_local_ned()
     mavlink_msg_position_target_local_ned_send(
         chan,
         AP_HAL::millis(), // time boot ms
-        MAV_FRAME_LOCAL_NED, 
+        MAV_FRAME_LOCAL_NED,
         type_mask,
         target_pos.x, // x in metres
         target_pos.y, // y in metres
@@ -935,36 +937,42 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
 
         // exit if vehicle is not in Guided mode or Auto-Guided mode
         if (!copter.flightmode->in_guided_mode()) {
-            break;
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "SET_ATTITUDE_TARGET does not work unless in guided mode.");
         }
 
+        bool rate_ignore = packet.type_mask & ((1<<0)|(1<<1)|(1<<2));
+        bool thrust_ignore = packet.type_mask & (1 << 6);
+        bool attitude_ignore = packet.type_mask & (1 << 7);
         // ensure type_mask specifies to use attitude and thrust
-        if ((packet.type_mask & ((1<<7)|(1<<6))) != 0) {
-            break;
+        if (thrust_ignore) {
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "SET_ATTITUDE_TARGET must not ignore thrust.");
         }
 
-        // convert thrust to climb rate
         packet.thrust = constrain_float(packet.thrust, 0.0f, 1.0f);
-        float climb_rate_cms = 0.0f;
-        if (is_equal(packet.thrust, 0.5f)) {
-            climb_rate_cms = 0.0f;
-        } else if (packet.thrust > 0.5f) {
-            // climb at up to WPNAV_SPEED_UP
-            climb_rate_cms = (packet.thrust - 0.5f) * 2.0f * copter.wp_nav->get_default_speed_up();
+
+        if (rate_ignore && !attitude_ignore) {
+            // otherwise use the commanded yaw rate
+            bool use_yaw_rate = false;
+            if ((packet.type_mask & (1<<2)) == 0) {
+                use_yaw_rate = true;
+            }
+
+            copter.mode_guided.set_angle(
+                Quaternion(packet.q[0],packet.q[1],packet.q[2],packet.q[3]),
+                packet.thrust,
+                use_yaw_rate,
+                packet.body_yaw_rate
+            );
+        } else if (!rate_ignore && attitude_ignore) {
+            copter.mode_guided.set_rate(
+                packet.body_roll_rate,
+                packet.body_pitch_rate,
+                packet.body_yaw_rate,
+                packet.thrust
+            );
         } else {
-            // descend at up to WPNAV_SPEED_DN
-            climb_rate_cms = (0.5f - packet.thrust) * 2.0f * -fabsf(copter.wp_nav->get_default_speed_down());
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "SET_ATTITUDE_TARGET invalid type_mask");
         }
-
-        // if the body_yaw_rate field is ignored, use the commanded yaw position
-        // otherwise use the commanded yaw rate
-        bool use_yaw_rate = false;
-        if ((packet.type_mask & (1<<2)) == 0) {
-            use_yaw_rate = true;
-        }
-
-        copter.mode_guided.set_angle(Quaternion(packet.q[0],packet.q[1],packet.q[2],packet.q[3]),
-            climb_rate_cms, use_yaw_rate, packet.body_yaw_rate);
 
         break;
     }
@@ -975,8 +983,11 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
         mavlink_set_position_target_local_ned_t packet;
         mavlink_msg_set_position_target_local_ned_decode(&msg, &packet);
 
+        // gcs().send_text(MAV_SEVERITY_CRITICAL, "hello world! %5.3f", (double)3.142f);
+
         // exit if vehicle is not in Guided mode or Auto-Guided mode
         if (!copter.flightmode->in_guided_mode()) {
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "not in guided mode");
             break;
         }
 
@@ -985,6 +996,7 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
             packet.coordinate_frame != MAV_FRAME_LOCAL_OFFSET_NED &&
             packet.coordinate_frame != MAV_FRAME_BODY_NED &&
             packet.coordinate_frame != MAV_FRAME_BODY_OFFSET_NED) {
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "unknown coordinate frame");
             break;
         }
 
@@ -1052,11 +1064,18 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
 
         // send request
         if (!pos_ignore && !vel_ignore && acc_ignore) {
+            // gcs().send_text(MAV_SEVERITY_CRITICAL, "set_destination_posvel");
             copter.mode_guided.set_destination_posvel(pos_vector, vel_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds, yaw_relative);
         } else if (pos_ignore && !vel_ignore && acc_ignore) {
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "set_velocity (%5.3f, %5.3f, %5.3f %5.3f)", (double)vel_vector.x, (double)vel_vector.y, (double)vel_vector.z, (double)yaw_rate_cds);
             copter.mode_guided.set_velocity(vel_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds, yaw_relative);
         } else if (!pos_ignore && vel_ignore && acc_ignore) {
+            // gcs().send_text(MAV_SEVERITY_CRITICAL, "set_destination");
             copter.mode_guided.set_destination(pos_vector, !yaw_ignore, yaw_cd, !yaw_rate_ignore, yaw_rate_cds, yaw_relative);
+        // } else if (pos_ignore && vel_ignore && !acc_ignore) {
+        //     copter.mode_guided.said_attitude
+        } else {
+            gcs().send_text(MAV_SEVERITY_CRITICAL, "none");
         }
 
         break;
@@ -1249,7 +1268,7 @@ void GCS_MAVLINK_Copter::handleMessage(const mavlink_message_t &msg)
         copter.g2.toy_mode.handle_message(msg);
         break;
 #endif
-        
+
     default:
         handle_common_message(msg);
         break;

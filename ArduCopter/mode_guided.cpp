@@ -1,4 +1,5 @@
 #include "Copter.h"
+#include <GCS_MAVLink/GCS.h>
 
 #if MODE_GUIDED_ENABLED == ENABLED
 
@@ -24,9 +25,17 @@ struct {
     float pitch_cd;
     float yaw_cd;
     float yaw_rate_cds;
-    float climb_rate_cms;
+    float thrust;
     bool use_yaw_rate;
 } static guided_angle_state;
+
+struct {
+  float roll_rate;
+  float pitch_rate;
+  float yaw_rate;
+  float throttle;
+  uint32_t update_time_ms;
+} static guided_rate_state;
 
 struct Guided_Limit {
     uint32_t timeout_ms;  // timeout (in seconds) from the time that guided is invoked
@@ -165,9 +174,26 @@ void ModeGuided::angle_control_start()
     guided_angle_state.roll_cd = ahrs.roll_sensor;
     guided_angle_state.pitch_cd = ahrs.pitch_sensor;
     guided_angle_state.yaw_cd = ahrs.yaw_sensor;
-    guided_angle_state.climb_rate_cms = 0.0f;
+    guided_angle_state.thrust = 0.0f;
     guided_angle_state.yaw_rate_cds = 0.0f;
     guided_angle_state.use_yaw_rate = false;
+
+    // pilot always controls yaw
+    auto_yaw.set_mode(AUTO_YAW_HOLD);
+}
+
+// initialise guided mode's rate controller
+void ModeGuided::rate_control_start()
+{
+    // set guided_mode to velocity controller
+    guided_mode = Guided_Rate;
+
+    // initialise targets
+    guided_rate_state.update_time_ms = millis();
+    guided_rate_state.roll_rate = 0.0f;
+    guided_rate_state.pitch_rate = 0.0f;
+    guided_rate_state.yaw_rate = 0.0f;
+    guided_rate_state.throttle = 0.0f;
 
     // pilot always controls yaw
     auto_yaw.set_mode(AUTO_YAW_HOLD);
@@ -301,9 +327,9 @@ bool ModeGuided::set_destination_posvel(const Vector3f& destination, const Vecto
 }
 
 // set guided mode angle target
-void ModeGuided::set_angle(const Quaternion &q, float climb_rate_cms, bool use_yaw_rate, float yaw_rate_rads)
+void ModeGuided::set_angle(const Quaternion &q, float thrust, bool use_yaw_rate, float yaw_rate_rads)
 {
-    // check we are in velocity control mode
+    // check we are in angle control mode
     if (guided_mode != Guided_Angle) {
         angle_control_start();
     }
@@ -316,18 +342,43 @@ void ModeGuided::set_angle(const Quaternion &q, float climb_rate_cms, bool use_y
     guided_angle_state.yaw_rate_cds = ToDeg(yaw_rate_rads) * 100.0f;
     guided_angle_state.use_yaw_rate = use_yaw_rate;
 
-    guided_angle_state.climb_rate_cms = climb_rate_cms;
+    guided_angle_state.thrust = thrust;
     guided_angle_state.update_time_ms = millis();
 
     // interpret positive climb rate as triggering take-off
-    if (motors->armed() && !copter.ap.auto_armed && (guided_angle_state.climb_rate_cms > 0.0f)) {
+    if (motors->armed() && !copter.ap.auto_armed && (guided_angle_state.thrust > 0.0f)) {
         copter.set_auto_armed(true);
     }
 
     // log target
     copter.Log_Write_GuidedTarget(guided_mode,
                            Vector3f(guided_angle_state.roll_cd, guided_angle_state.pitch_cd, guided_angle_state.yaw_cd),
-                           Vector3f(0.0f, 0.0f, guided_angle_state.climb_rate_cms));
+                           Vector3f(0.0f, 0.0f, guided_angle_state.thrust));
+}
+
+// set guided mode rate/throttle target
+void ModeGuided::set_rate(float roll_rate, float pitch_rate, float yaw_rate, float throttle)
+{
+    // check we are in angle control mode
+    if (guided_mode != Guided_Rate) {
+        rate_control_start();
+    }
+
+    guided_rate_state.roll_rate = roll_rate;
+    guided_rate_state.pitch_rate = pitch_rate;
+    guided_rate_state.yaw_rate = yaw_rate;
+    guided_rate_state.throttle = throttle;
+    guided_rate_state.update_time_ms = millis();
+
+    // interpret positive climb rate as triggering take-off
+    if (motors->armed() && !copter.ap.auto_armed && (guided_rate_state.throttle > 0.0f)) {
+        copter.set_auto_armed(true);
+    }
+
+    // // log target
+    // copter.Log_Write_GuidedTarget(guided_mode,
+    //                        Vector3f(guided_angle_state.roll_cd, guided_angle_state.pitch_cd, guided_angle_state.yaw_cd),
+    //                        Vector3f(0.0f, 0.0f, guided_angle_state.climb_rate_cms));
 }
 
 // guided_run - runs the guided controller
@@ -360,6 +411,11 @@ void ModeGuided::run()
     case Guided_Angle:
         // run angle controller
         angle_control_run();
+        break;
+
+    case Guided_Rate:
+        // run angle controller
+        rate_control_run();
         break;
     }
  }
@@ -473,8 +529,10 @@ void ModeGuided::vel_control_run()
     }
 
     // if not armed set throttle to zero and exit immediately
-    if (is_disarmed_or_landed()) {
+    // if (is_disarmed_or_landed()) {
+    if (!is_armed()) {
         make_safe_spool_down();
+        // ::gcs().send_text(MAV_SEVERITY_CRITICAL, "vel_control_run: is disarmed");
         return;
     }
 
@@ -505,7 +563,7 @@ void ModeGuided::vel_control_run()
         // roll & pitch from velocity controller, yaw rate from mavlink command or mission item
         attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(pos_control->get_roll(), pos_control->get_pitch(), auto_yaw.rate_cds());
     } else {
-        // roll, pitch from waypoint controller, yaw heading from GCS or auto_heading()
+        // roll & pitch from waypoint controller, yaw heading from GCS or auto_heading()
         attitude_control->input_euler_angle_roll_pitch_yaw(pos_control->get_roll(), pos_control->get_pitch(), auto_yaw.yaw(), true);
     }
 }
@@ -595,29 +653,26 @@ void ModeGuided::angle_control_run()
     float yaw_rate_in = wrap_180_cd(guided_angle_state.yaw_rate_cds);
 
     // constrain climb rate
-    float climb_rate_cms = constrain_float(guided_angle_state.climb_rate_cms, -fabsf(wp_nav->get_default_speed_down()), wp_nav->get_default_speed_up());
-
-    // get avoidance adjusted climb rate
-    climb_rate_cms = get_avoidance_adjusted_climbrate(climb_rate_cms);
+    float thrust = constrain_float(guided_angle_state.thrust, 0.0f, 1.0f);
 
     // check for timeout - set lean angles and climb rate to zero if no updates received for 3 seconds
     uint32_t tnow = millis();
     if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_MS) {
         roll_in = 0.0f;
         pitch_in = 0.0f;
-        climb_rate_cms = 0.0f;
+        thrust = 0.0f;
         yaw_rate_in = 0.0f;
     }
 
     // if not armed set throttle to zero and exit immediately
-    if (!motors->armed() || !copter.ap.auto_armed || (copter.ap.land_complete && (guided_angle_state.climb_rate_cms <= 0.0f))) {
+    if (!motors->armed() || !copter.ap.auto_armed || (copter.ap.land_complete && (guided_angle_state.thrust <= 0.0f))) {
         make_safe_spool_down();
         return;
     }
 
     // TODO: use get_alt_hold_state
     // landed with positive desired climb rate, takeoff
-    if (copter.ap.land_complete && (guided_angle_state.climb_rate_cms > 0.0f)) {
+    if (copter.ap.land_complete && (guided_angle_state.thrust > 0.0f)) {
         zero_throttle_and_relax_ac();
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
         if (motors->get_spool_state() == AP_Motors::SpoolState::THROTTLE_UNLIMITED) {
@@ -637,9 +692,54 @@ void ModeGuided::angle_control_run()
         attitude_control->input_euler_angle_roll_pitch_yaw(roll_in, pitch_in, yaw_in, true);
     }
 
-    // call position controller
-    pos_control->set_alt_target_from_climb_rate_ff(climb_rate_cms, G_Dt, false);
-    pos_control->update_z_controller();
+    // throttle without angle boost
+    attitude_control->set_throttle_out(thrust, false, copter.g.throttle_filt);
+}
+
+// called from guided_run
+void ModeGuided::rate_control_run()
+{
+    // TODO constrain desired lean angles
+    float roll_rate = guided_rate_state.roll_rate;
+    float pitch_rate = guided_rate_state.pitch_rate;
+    float yaw_rate = guided_rate_state.yaw_rate;
+    float throttle = guided_rate_state.throttle;
+
+    // check for timeout - set lean angles and climb rate to zero if no updates received for 3 seconds
+    uint32_t tnow = millis();
+    if (tnow - guided_rate_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_MS) {
+        roll_rate = 0.0f;
+        pitch_rate = 0.0f;
+        yaw_rate = 0.0f;
+        // TODO: something else here?
+        throttle = 0.0f;
+    }
+
+    // if not armed set throttle to zero and exit immediately
+    if (!motors->armed() || !copter.ap.auto_armed || (copter.ap.land_complete && (guided_rate_state.throttle <= 0.0f))) {
+        make_safe_spool_down();
+        return;
+    }
+
+    // landed with positive desired climb rate, takeoff
+    if (copter.ap.land_complete && (guided_rate_state.throttle > 0.0f)) {
+        zero_throttle_and_relax_ac();
+        motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
+        if (motors->get_spool_state() == AP_Motors::SpoolState::THROTTLE_UNLIMITED) {
+            set_land_complete(false);
+            set_throttle_takeoff();
+        }
+        return;
+    }
+
+    // set motors to full range
+    motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
+
+    // run attitude controller
+    attitude_control->input_rate_bf_roll_pitch_yaw(roll_rate, pitch_rate, yaw_rate);
+
+    // throttle without angle boost
+    attitude_control->set_throttle_out(throttle, false, copter.g.throttle_filt);
 }
 
 // helper function to update position controller's desired velocity while respecting acceleration limits

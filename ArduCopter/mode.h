@@ -769,7 +769,8 @@ public:
     bool has_user_takeoff(bool must_navigate) const override { return true; }
     bool in_guided_mode() const override { return true; }
 
-    void set_angle(const Quaternion &q, float climb_rate_cms, bool use_yaw_rate, float yaw_rate_rads);
+    void set_rate(float body_roll_rate, float body_pitch_rate, float body_yaw_rate, float thrust);
+    void set_angle(const Quaternion &q, float thrust, bool use_yaw_rate, float yaw_rate_rads);
     bool set_destination(const Vector3f& destination, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false);
     bool set_destination(const Location& dest_loc, bool use_yaw = false, float yaw_cd = 0.0, bool use_yaw_rate = false, float yaw_rate_cds = 0.0, bool yaw_relative = false);
     bool get_wp(Location &loc) override;
@@ -805,10 +806,12 @@ private:
     void pos_control_start();
     void vel_control_start();
     void posvel_control_start();
+    void rate_control_start();
     void takeoff_run();
     void pos_control_run();
     void vel_control_run();
     void posvel_control_run();
+    void rate_control_run();
     void set_desired_velocity_with_accel_and_fence_limits(const Vector3f& vel_des);
     void set_yaw_state(bool use_yaw, float yaw_cd, bool use_yaw_rate, float yaw_rate_cds, bool relative_angle);
 
