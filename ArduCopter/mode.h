@@ -780,6 +780,7 @@ public:
     bool limit_check();
 
     bool is_taking_off() const override;
+    bool is_armed() const;
 
     bool do_user_takeoff_start(float final_alt_above_home) override;
 
@@ -1345,7 +1346,7 @@ protected:
     uint32_t last_log_ms;   // system time of last time desired velocity was logging
 };
 
-class ModeZigZag : public Mode {        
+class ModeZigZag : public Mode {
 
 public:
 
