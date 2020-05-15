@@ -411,6 +411,11 @@ void Mode::auto_takeoff_run()
     auto_takeoff_attitude_run(target_yaw_rate);
 }
 
+bool ModeGuided::is_armed() const
+{
+    return motors->armed() || copter.ap.auto_armed;
+}
+
 // guided_pos_control_run - runs the guided position controller
 // called from guided_run
 void ModeGuided::pos_control_run()
@@ -426,7 +431,7 @@ void ModeGuided::pos_control_run()
     }
 
     // if not armed set throttle to zero and exit immediately
-    if (is_disarmed_or_landed()) {
+    if (!is_armed()) {
         make_safe_spool_down();
         return;
     }
