@@ -1,4 +1,5 @@
 #include "Copter.h"
+#include <GCS_MAVLink/GCS.h>
 
 Mode::_TakeOff Mode::takeoff;
 
@@ -20,27 +21,36 @@ bool Mode::do_user_takeoff_start(float takeoff_alt_cm)
 bool Mode::do_user_takeoff(float takeoff_alt_cm, bool must_navigate)
 {
     if (!copter.motors->armed()) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "can't take off without arming motors");
         return false;
     }
     if (!copter.ap.land_complete) {
         // can't takeoff again!
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "can't take off again");
         return false;
     }
     if (!has_user_takeoff(must_navigate)) {
         // this mode doesn't support user takeoff
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "this mode doesn't support user takeoff");
         return false;
     }
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "requested altitude (cm) %5.3f", (double)takeoff_alt_cm);
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "current altitude (cm) %5.3f", (double)copter.current_loc.alt);
+
     if (takeoff_alt_cm <= copter.current_loc.alt) {
         // can't takeoff downwards...
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "can't take off downwards");
         return false;
     }
 
     // Helicopters should return false if MAVlink takeoff command is received while the rotor is not spinning
     if (motors->get_spool_state() != AP_Motors::SpoolState::THROTTLE_UNLIMITED && copter.ap.using_interlock) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "cannot take off: rotor is not spinning");
         return false;
     }
 
     if (!do_user_takeoff_start(takeoff_alt_cm)) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "do_user_takeoff_start failed");
         return false;
     }
 
@@ -58,6 +68,8 @@ void Mode::_TakeOff::start(float alt_cm)
 
     // calculate climb rate
     const float speed = MIN(copter.wp_nav->get_default_speed_up(), MAX(copter.g.pilot_speed_up*2.0f/3.0f, copter.g.pilot_speed_up-50.0f));
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "takeoff speeds: %5.3f, %5.3f, %5.3f", (double)copter.wp_nav->get_default_speed_up(), (double)(copter.g.pilot_speed_up*2.0f/3.0f), (double)(copter.g.pilot_speed_up-50.0f));
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "takeoff speed: %5.3f", (double)speed);
 
     // sanity check speed and target
     if (speed <= 0.0f || alt_cm <= 0.0f) {
