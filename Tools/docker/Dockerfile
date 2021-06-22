@@ -8,6 +8,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install --no-instal
     python-software-properties && \
     apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# ENV SKIP_AP_GIT_CHECK=1
 ADD Tools/environment_install/install-prereqs-ubuntu.sh /ardupilot/Tools/environment_install/install-prereqs-ubuntu.sh
 ENV USER=root
 RUN bash -c "Tools/environment_install/install-prereqs-ubuntu.sh -y && apt-get install gcc-arm-none-eabi -y" && \

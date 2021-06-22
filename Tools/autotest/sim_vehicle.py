@@ -306,7 +306,7 @@ def do_build_waf(opts, frame_options):
 
     if opts.flash_storage:
         cmd_configure.append("--sitl-flash-storage")
-        
+
     pieces = [shlex.split(x) for x in opts.waf_configure_args]
     for piece in pieces:
         cmd_configure.extend(piece)
@@ -957,6 +957,9 @@ group_sim.add_option("-Z", "--swarm",
 group_sim.add_option("--flash-storage",
                      action='store_true',
                      help="enable use of flash storage emulation")
+group_sim.add_option("--build-only",
+                     action='store_true',
+                     help="don't actually run mavproxy and arducopter")
 parser.add_option_group(group_sim)
 
 
@@ -1133,18 +1136,21 @@ else:
         print("Vehicle binary (%s) does not exist" % (vehicle_binary,))
         sys.exit(1)
 
-    start_vehicle(vehicle_binary,
-                  find_autotest_dir(),
-                  cmd_opts,
-                  frame_infos,
-                  loc=location)
+    if not cmd_opts.build_only:
+        start_vehicle(vehicle_binary,
+                      find_autotest_dir(),
+                      cmd_opts,
+                      frame_infos,
+                      loc=location)
 
 if cmd_opts.delay_start:
     progress("Sleeping for %f seconds" % (cmd_opts.delay_start,))
     time.sleep(float(cmd_opts.delay_start))
 
 try:
-    if cmd_opts.no_mavproxy:
+    if cmd_opts.build_only:
+        pass
+    elif cmd_opts.no_mavproxy:
         time.sleep(3)  # output our message after run_in_terminal_window.sh's
         progress("Waiting for SITL to exit")
         wait_unlimited()

@@ -32,7 +32,7 @@ post_mode should be set to POST_LAZY. Example::
         ...
 """
 
-from waflib import Context, Logs, Task, Utils
+from waflib import Context, Logs, Task, Utils, Errors
 from waflib.Configure import conf
 from waflib.TaskGen import before_method, feature, taskgen_method
 
@@ -158,12 +158,15 @@ def git_submodule_post_fun(bld):
     bld.add_post_fun(_post_fun)
 
 def _git_head_hash(ctx, path, short=False):
-    cmd = [ctx.env.get_flat('GIT'), 'rev-parse']
-    if short:
-        cmd.append('--short=8')
-    cmd.append('HEAD')
-    out = ctx.cmd_and_log(cmd, quiet=Context.BOTH, cwd=path)
-    return out.strip()
+    try:
+        cmd = [ctx.env.get_flat('GIT'), 'rev-parse']
+        if short:
+            cmd.append('--short=8')
+        cmd.append('HEAD')
+        out = ctx.cmd_and_log(cmd, quiet=Context.BOTH, cwd=path)
+        return out.strip()
+    except Errors.WafError as e:
+        return '00000000'
 
 @conf
 def git_submodule_head_hash(self, name, short=False):
