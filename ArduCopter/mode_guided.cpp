@@ -12,7 +12,9 @@
 #endif
 
 #define GUIDED_POSVEL_TIMEOUT_MS    3000    // guided mode's position-velocity controller times out after 3seconds with no new updates
-#define GUIDED_ATTITUDE_TIMEOUT_MS  1000    // guided mode's attitude controller times out after 1 second with no new updates
+#define GUIDED_ATTITUDE_TIMEOUT_1_MS  150     // guided mode's attitude controller times out after 1 second with no new updates
+#define GUIDED_ATTITUDE_TIMEOUT_2_MS  250     // guided mode's attitude controller times out after 1 second with no new updates
+#define GUIDED_ATTITUDE_TIMEOUT_3_MS  500     // guided mode's attitude controller times out after 1 second with no new updates
 
 static Vector3f guided_pos_target_cm;       // position target (used by posvel controller only)
 static Vector3f guided_vel_target_cms;      // velocity target (used by velocity controller and posvel controller)
@@ -86,6 +88,9 @@ bool ModeGuided::do_user_takeoff_start(float final_alt_above_home)
 // initialise guided mode's position controller
 void ModeGuided::pos_control_start()
 {
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "pos_control disabled");
+    return;
+
     // set to position control mode
     guided_mode = Guided_WP;
 
@@ -106,6 +111,9 @@ void ModeGuided::pos_control_start()
 // initialise guided mode's velocity controller
 void ModeGuided::vel_control_start()
 {
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "vel_control disabled");
+    return;
+
     // set guided_mode to velocity controller
     guided_mode = Guided_Velocity;
 
@@ -124,6 +132,9 @@ void ModeGuided::vel_control_start()
 // initialise guided mode's posvel controller
 void ModeGuided::posvel_control_start()
 {
+    ::gcs().send_text(MAV_SEVERITY_CRITICAL, "posvel_control disabled");
+    return;
+
     // set guided_mode to velocity controller
     guided_mode = Guided_PosVel;
 
@@ -659,19 +670,27 @@ void ModeGuided::angle_control_run()
     // constrain climb rate
     float thrust = constrain_float(guided_angle_state.thrust, 0.0f, 1.0f);
 
-    // check for timeout - set lean angles and climb rate to zero if no updates received for 3 seconds
-    uint32_t tnow = millis();
-    if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_MS) {
-        roll_in = 0.0f;
-        pitch_in = 0.0f;
-        thrust = 0.0f;
-        yaw_rate_in = 0.0f;
-    }
-
     // if not armed set throttle to zero and exit immediately
     if (!motors->armed() || !copter.ap.auto_armed || (copter.ap.land_complete && (guided_angle_state.thrust <= 0.0f))) {
         make_safe_spool_down();
         return;
+    }
+
+    // check for timeout - set lean angles and climb rate to zero if no updates received for 3 seconds
+    uint32_t tnow = millis();
+    if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_3_MS) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "angle_control_run: disarm");
+        copter.arming.disarm();
+        return;
+    } else if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_2_MS) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "angle_control_run: make_safe_spool_down");
+        make_safe_spool_down();
+        return;
+    } else if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_1_MS) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "angle_control_run: 0 angle");
+        roll_in = 0.0f;
+        pitch_in = 0.0f;
+        yaw_rate_in = 0.0f;
     }
 
     // TODO: use get_alt_hold_state
@@ -709,20 +728,28 @@ void ModeGuided::rate_control_run()
     float yaw_rate = guided_rate_state.yaw_rate;
     float throttle = guided_rate_state.throttle;
 
+    // if not armed set throttle to zero and exit immediately
+    if (!motors->armed() || !copter.ap.auto_armed || (copter.ap.land_complete && (guided_angle_state.thrust <= 0.0f))) {
+        make_safe_spool_down();
+        return;
+    }
+
     // check for timeout - set lean angles and climb rate to zero if no updates received for 3 seconds
     uint32_t tnow = millis();
-    if (tnow - guided_rate_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_MS) {
+    if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_3_MS) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "rate_control_run: disarming");
+        copter.arming.disarm();
+        return;
+    } else if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_2_MS) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "rate_control_run: make_safe_spool_down");
+        make_safe_spool_down();
+        return;
+    } else if (tnow - guided_angle_state.update_time_ms > GUIDED_ATTITUDE_TIMEOUT_1_MS) {
+        ::gcs().send_text(MAV_SEVERITY_CRITICAL, "rate_control_run: 0 rate");
+        // TODO: maybe safer to switch to angle_control here?
         roll_rate = 0.0f;
         pitch_rate = 0.0f;
         yaw_rate = 0.0f;
-        // TODO: something else here?
-        throttle = 0.0f;
-    }
-
-    // if not armed set throttle to zero and exit immediately
-    if (!motors->armed() || !copter.ap.auto_armed || (copter.ap.land_complete && (guided_rate_state.throttle <= 0.0f))) {
-        make_safe_spool_down();
-        return;
     }
 
     // landed with positive desired climb rate, takeoff
